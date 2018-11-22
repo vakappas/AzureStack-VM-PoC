@@ -41,6 +41,17 @@
                 "name": 4
             }
         },
+        "StandardOrPremium":{
+            "type": "string",
+            "defaultValue": "StandardSSD_LRS",
+            "allowedValues": [
+                "Premium_LRS",
+                "StandardSSD_LRS"
+            ],
+            "metadata": {
+                "name": "Standard or Premuim SSDs"
+            }
+        },
         "virtualNetworkName": {
             "defaultValue": "AzureStack-VNET",
             "type": "string",
@@ -85,15 +96,7 @@
         },
         "publicDnsName": {
             "type": "string"
-        },
-        "osDiskVhdUri": {
-            "defaultValue": "https://azurestackvhd.blob.core.windows.net/vhds/asdk_latest.vhd",
-            "type": "string",
-            "metadata": {
-                "description": "Uri of the your user image",
-                "name": "https://azurestackvhd.blob.core.windows.net/vhds/asdk_latest.vhd"
-            }
-        },
+        },        
         "postConfigScriptLocation": { 
             "defaultValue": "https://raw.githubusercontent.com/yagmurs/AzureStack-VM-PoC/development/scripts",
             "type": "string",
@@ -103,11 +106,11 @@
             }
         },
         "postConfigScriptFilename": { 
-            "defaultValue": "post-configv2.ps1",
+            "defaultValue": "post-config.ps1",
             "type": "string",
             "metadata": {
                 "description": "the post config script file name",
-                "name": "post-configv2.ps1"
+                "name": "post-config.ps1"
             }
         },
         "autoShutdownStatus": {
@@ -145,6 +148,17 @@
             "metadata": {
                 "name": "Disabled"
             }
+        },
+        "autoDownloadASDK": {
+            "type": "bool",
+            "defaultValue": false,
+            "allowedValues": [
+                true,
+                false
+            ],
+            "metadata": {
+                "name": false
+            }
         }
     },
     "variables": {
@@ -161,29 +175,12 @@
     },
     "resources": [
         {
-            "type": "Microsoft.Compute/images",
-            "name": "[variables('imageName')]",
-            "apiVersion": "2017-03-30",
-            "location": "[variables('location')]",
-            "properties": {
-                "storageProfile": {
-                    "osDisk": {
-                        "osType": "Windows",
-                        "osState": "Generalized",
-                        "blobUri": "[parameters('osDiskVhdUri')]",
-                        "storageAccountType": "Premium_LRS"
-                    }
-                }
-            }
-        },
-        {
             "type": "Microsoft.Compute/virtualMachines",
             "name": "[parameters('virtualMachineName')]",
-            "apiVersion": "2017-03-30",
+            "apiVersion": "2018-04-01",
             "location": "[variables('location')]",
             "dependsOn": [
-                "[concat('Microsoft.Network/networkInterfaces/', variables('networkInterfaceName'))]",
-                "[concat('Microsoft.Compute/images/', variables('imageName'))]"
+                "[concat('Microsoft.Network/networkInterfaces/', variables('networkInterfaceName'))]"
             ],
             "properties": {
                 "osProfile": {
@@ -199,14 +196,17 @@
                 },
                 "storageProfile": {
                     "imageReference": {
-                        "id": "[resourceId('Microsoft.Compute/Images', variables('imageName'))]"
+                        "publisher": "MicrosoftWindowsServer",
+                        "offer": "WindowsServer",
+                        "sku": "2016-Datacenter",
+                        "version": "latest"
                     },
                     "osDisk": {
                         "createOption":"FromImage",
                         "diskSizeGB": "[variables('osDiskSizeinGB')]",
                         "name": "[concat(parameters('virtualMachineName'),'-osdisk')]",
                         "managedDisk": {
-                            "storageAccountType": "Premium_LRS"
+                            "storageAccountType": "[parameters('StandardOrPremium')]"
                     }
                     },
                     "copy": [{
@@ -219,7 +219,7 @@
                                 "diskSizeGB": "[parameters('dataDiskSizeinGB')]",
                                 "caching": "ReadOnly",
                                 "managedDisk": {
-                                    "storageAccountType": "Premium_LRS"
+                                    "storageAccountType": "[parameters('StandardOrPremium')]"
                                 }
                             }
                         }
@@ -252,7 +252,7 @@
                             "fileUris": [
                                 "[variables('fileUri')]"
                             ],
-                            "commandToExecute": "[concat('powershell.exe -ExecutionPolicy Unrestricted -File ', parameters('postConfigScriptFilename'), ' ', '-Username', ' ', variables('adminUsername'))]"
+                            "commandToExecute": "[concat('powershell.exe -ExecutionPolicy Unrestricted -File ', parameters('postConfigScriptFilename'), ' ', '-Username', ' ', variables('adminUsername'), ' ', '-EnableDownloadASDK', ' ', '-AutoDownloadASDK', ' ', parameters('autoDownloadASDK'))]"
                         }
                     }
                 },
