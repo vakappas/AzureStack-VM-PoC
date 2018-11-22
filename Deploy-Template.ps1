@@ -13,6 +13,7 @@ $templateParameters = @{
     publicDnsName = "vklab-asdk"
     autoDownloadASDK = $true
     virtualNetworkName = "ASDK-VNET"
+    virtualMachineSize = "Standard_E20s_v3"
 }
 
 
