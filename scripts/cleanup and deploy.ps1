@@ -1,44 +1,41 @@
-﻿$resourceGroupName = "azs3"
-if (-not (Get-AzureRmSubscription))
-{
-    Login-AzureRmAccount
-}
-Get-AzureRmVM -ResourceGroupName $resourceGroupName | Remove-AzureRmVM -Force
-Get-AzureRmNetworkInterface -ResourceGroupName $resourceGroupName | Remove-AzureRmNetworkInterface -Force
-Get-AzureRmNetworkSecurityGroup -ResourceGroupName $resourceGroupName | Remove-AzureRmNetworkSecurityGroup -Force
-Get-AzureRmPublicIpAddress -ResourceGroupName $resourceGroupName | Remove-AzureRmPublicIpAddress -Force
-$disks = Get-AzureRmDisk
-if ($resourceGroupName -like "*test*")
-{
-    $disks | Remove-AzureRmDisk -Force
-}
-else
-{
-    $disks | ? name -like *_OSDisk_* | Remove-AzureRmDisk -Force
-    $disks | ? name -like *-disk* | Remove-AzureRmDisk -Force
-}
-Get-AzureRmVirtualNetwork -ResourceGroupName $resourceGroupName | Remove-AzureRmVirtualNetwork -Force
+﻿$tenantID = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+$subscriptionID = "yyyyyyyy-yyyy-yyyy-yyyy-yyyyyyyyyyyy"
 
-Remove-AzureRmResourceGroup -ResourceGroupName $resourceGroupName -Force
+Connect-AzureRmAccount -TenantId $tenantID -Subscription $subscriptionID
 
-Test-AzureRmResourceGroupDeployment -ResourceGroupName $resourceGroupName `
-  -TemplateUri https://raw.githubusercontent.com/yagmurs/yagmurs_AzureVMExtension/master/azuredeploy.json `
-  -TemplateParameterUri https://raw.githubusercontent.com/yagmurs/yagmurs_AzureVMExtension/master/azuredeploy.parameters.jsonRemove-AzureRmResourceGroup -Force
+# create administrator password secure string object
+$SecureAdminPassword = Read-Host -AsSecureString -Prompt "Provide local Administrator password for Azure Stack host VM" | ConvertTo-SecureString -AsPlainText -Force
+#$SecureAdminPassword = "SuperSecurePassword123!!" | ConvertTo-SecureString -AsPlainText -Force
 
-New-AzureRmResourceGroup -Name $resourceGroupName -Location 'west europe'
+# declare variables 
+[int]$instanceNumber = 1 # resource group name will be generated based on this number. 
+[bool]$autoDownloadASDK = $false #either download latest ADSK in the VM or not. Setting this to $true will add additional ~35 mins to ARM template deployment time.
+[string]$resourceGroupNamePrefix = "yagmursasdk" #Resource group name will be generated based on this prefix. Ex. yagmursasdk-1
+[string]$publicDnsNamePrefix = "yagmursasdkinstance" # This will will be concatenated with $instancenumber. Ex. yagmursasdkinstance1.eastus2.cloudapp.azure.com
+[string]$location = 'East US2' # can be any region that supports E and D VM sizes that supports nested virtualization.
+[string]$virtualMachineSize = "Standard_E32s_v3" # 1811 and upper versions require 256GB RAM
+[ValidateSet("development", "master")][string]$gitBranch = "master" # github branch 
+[string]$resourceGroupName = "$resourceGroupNamePrefix-$instanceNumber"
+[string]$publicDnsName = "$publicDnsNamePrefix$instanceNumber"
+
+# create ARM template parameter object
+$templateParameterObject = @{}
+$templateParameterObject.Add("adminPassword", $SecureAdminPassword)
+$templateParameterObject.Add("publicDnsName",$publicDnsName.ToLower())
+$templateParameterObject.Add("autoDownloadASDK", $autoDownloadASDK)
+$templateParameterObject.Add("virtualMachineSize", $virtualMachineSize)
+
+# create resource group
+New-AzureRmResourceGroup -Name $resourceGroupName -Location $location
+
+# deploy ARM template from github using locally provided ARM template parameters
 New-AzureRmResourceGroupDeployment -Name "$resourceGroupName-PoC-Deployment" -ResourceGroupName $resourceGroupName `
-  -TemplateUri https://raw.githubusercontent.com/yagmurs/yagmurs_AzureVMExtension/master/azuredeploy.json `
-  -TemplateParameterUri https://raw.githubusercontent.com/yagmurs/yagmurs_AzureVMExtension/master/azuredeploy.parameters.json `
-  -Mode Incremental
-
-New-AzureRmResourceGroupDeployment -Name "$resourceGroupName-PoC-Deployment" -ResourceGroupName $resourceGroupName `
-  -TemplateUri https://raw.githubusercontent.com/yagmurs/yagmurs_AzureVMExtension/master/azuredeploy.json `
-  -Mode Incremental
+    -TemplateUri "https://raw.githubusercontent.com/yagmurs/AzureStack-VM-PoC/$gitBranch/azuredeploy.json" `
+    -TemplateParameterObject $templateParameterObject `
+    -Mode Incremental `
+    -AsJob
 
 
-$swName = "NATSwitch"
-New-VMSwitch -Name $swName -SwitchType Internal -Verbose
-$NIC=Get-NetAdapter "vEthernet `($swName`)"
-New-NetIPAddress -IPAddress 172.16.0.1 -PrefixLength 24 -InterfaceIndex $NIC.ifIndex
-New-NetNat -Name $swName -InternalIPInterfaceAddressPrefix "172.16.0.0/24" –Verbose
-Get-VM -Name AzS-BGPNAT01 | Get-VMNetworkAdapter -Name NAT | Connect-VMNetworkAdapter -SwitchName $swName
+Pause
+# delete resource group and all object in the RG
+Get-AzureRmResourceGroup -Name $resourceGroupName | Remove-AzureRmResourceGroup -AsJob #-Force
