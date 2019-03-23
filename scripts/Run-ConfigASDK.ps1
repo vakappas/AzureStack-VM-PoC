@@ -16,7 +16,7 @@ $ConfigASDKParams = @{
     ISOPath = "C:\ConfigASDK\Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO"
     azureStackAdminPwd = "PASSWORD"
     VMpwd = $Creds.Password
-    azureAdUsername = "vklabadmin@vkappasoutlook.onmicrosoft.com"
+    azureAdUsername = "TO BE COMPLETED"
     azureAdPwd = "PASSWORD"
     azureRegSubId = "TO BE COMPLETED"
 }
