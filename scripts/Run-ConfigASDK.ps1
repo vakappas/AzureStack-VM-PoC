@@ -10,15 +10,15 @@ Start-BitsTransfer https://software-download.microsoft.com/download/pr/Windows_S
 
 $Creds = Get-Credential
 $ConfigASDKParams = @{
-    azureDirectoryTenantName = "vkappasoutlook.onmicrosoft.com"
+    azureDirectoryTenantName = "*.onmicrosoft.com"
     authenticationType = "AzureAd"
     downloadPath = "D:\ConfigASDK"
     ISOPath = "C:\ConfigASDK\Windows_Server_2016_Datacenter_EVAL_en-us_14393_refresh.ISO"
-    azureStackAdminPwd = "MySon@30012016"
+    azureStackAdminPwd = "PASSWORD"
     VMpwd = $Creds.Password
     azureAdUsername = "vklabadmin@vkappasoutlook.onmicrosoft.com"
-    azureAdPwd = "MySon@30012016"
-    azureRegSubId = "e6e464fa-adc1-46a7-962f-1cdefeeb8006"
+    azureAdPwd = "PASSWORD"
+    azureRegSubId = "TO BE COMPLETED"
 }
 
 .\ConfigASDK.ps1 -registerASDK -useAzureCredsForRegistration @ConfigASDKParams
