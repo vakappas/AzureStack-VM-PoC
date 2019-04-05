@@ -1,5 +1,5 @@
 # Login to Azure
-Login-AzureRmAccount
+Login-AzRmAccount
 
 # Select the Subscription on focus
 Select-AzureRmSubscription -Subscription "vakappas - Internal Consumption"
@@ -13,7 +13,7 @@ $templateParameters = @{
     publicDnsName = "vklab-asdk"
     autoDownloadASDK = $true
     virtualNetworkName = "ASDK-VNET"
-    virtualMachineSize = "Standard_E20s_v3"
+    virtualMachineSize = "Standard_E32s_v3"
 }
 
 
