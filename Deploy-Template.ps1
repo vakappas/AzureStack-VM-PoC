@@ -1,8 +1,8 @@
 # Login to Azure
-Login-AzRmAccount
+Login-AzAccount
 
 # Select the Subscription on focus
-Select-AzureRmSubscription -Subscription "vakappas - Internal Consumption"
+Select-AzSubscription -Subscription "vakappas - Internal Consumption"
 
 $cred = Get-Credential
 $rg = "ASDK-RG"
@@ -17,5 +17,6 @@ $templateParameters = @{
 }
 
 
-New-AzureRmResourceGroup -Name $rg -Location $location
-New-AzureRmResourceGroupDeployment -TemplateFile .\new-azuredeploy.json -TemplateParameterObject $templateParameters  -ResourceGroupName $rg
+New-AzResourceGroup -Name $rg -Location $location
+New-AzResourceGroupDeployment -TemplateFile .\azuredeploy.json -TemplateParameterObject $templateParameters  -ResourceGroupName $rg
+Remove-AzResourceGroup -Name $rg -Force
