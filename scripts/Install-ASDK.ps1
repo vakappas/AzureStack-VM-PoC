@@ -31,10 +31,10 @@ param (
 
 #region Variables
 $VerbosePreference = "Continue"
-$defaultLocalPath = "C:\AzureStackOnAzureVM"
-$gitbranchconfig = Import-Csv -Path $defaultLocalPath\config.ind -Delimiter ","
-$gitbranchcode = $gitbranchconfig.branch.Trim()
-$gitbranch = "https://raw.githubusercontent.com/yagmurs/AzureStack-VM-PoC/$gitbranchcode"
+$global:defaultLocalPath = "C:\AzureStackOnAzureVM"
+$transcriptLog = "Install-ASDK-transcript.txt"
+
+Start-Transcript -Path $(Join-Path -Path $defaultLocalPath -ChildPath $transcriptLog) -Append
 
 if (Test-Path "$defaultLocalPath\ASDKHelperModule.psm1")
 {
@@ -89,7 +89,6 @@ $asdkDownloadPath = "d:\"
 $asdkExtractFolder = "Azure Stack Development Kit"
 $d = Join-Path -Path $asdkDownloadPath -ChildPath $asdkExtractFolder
 $vhdxFullPath = Join-Path -Path $d -ChildPath "cloudbuilder.vhdx"
-$foldersToCopy = @('CloudDeployment', 'fwupdate', 'tools')
 
 if (Test-Path "C:\CloudDeployment\Configuration\Version\Version.xml")
 {
@@ -106,16 +105,18 @@ else
     if ($DownloadASDK) 
     {
         #Download ASDK files (BINs and EXE)
-        Write-Log @writeLogParams -Message "Finding available ASDK versions"
+        Write-Log @writeLogParams -Message "About to start downloading ASDK"
 
         if (!(Test-Path -Path $vhdxFullPath))
         {
             if ($null -eq $version -or $Version -eq "")
             {
+                Write-Log @writeLogParams -Message "No version info available switching to interactive mode"
                 $asdkFiles = ASDKDownloader -Interactive -Destination $asdkDownloadPath
             }
             else
             {
+                Write-Log @writeLogParams -Message "version explicitly specified $version"
                 $asdkFiles = ASDKDownloader -Version $Version -Destination $asdkDownloadPath
             }
             Write-Log @writeLogParams -Message "$asdkFiles"
@@ -132,24 +133,7 @@ else
         Write-Log @writeLogParams -Message "About to Start Copying ASDK files to C:\"
         Write-Log @writeLogParams -Message "Mounting cloudbuilder.vhdx"
     
-        try {
-            $driveLetter = Mount-DiskImage -ImagePath $vhdxFullPath -StorageType VHDX -Passthru | Get-DiskImage | Get-Disk | Get-Partition | Where-Object size -gt 500MB | Select-Object -ExpandProperty driveletter
-            Write-Log @writeLogParams -Message "The drive is now mounted as $driveLetter`:"
-        }
-        catch {
-            Write-Log @writeLogParams -Message "an error occured while mounting cloudbuilder.vhdx file"
-            Write-Log @writeLogParams -Message $error[0].Exception
-            throw "an error occured while mounting cloudbuilder.vhdx file"
-        }
-
-        foreach ($folder in $foldersToCopy)
-        {
-            Write-Log @writeLogParams -Message "Copying folder $folder to C:\"
-            Copy-Item -Path (Join-Path -Path $($driveLetter + ':') -ChildPath $folder) -Destination C:\ -Recurse -Force
-            Write-Log @writeLogParams -Message "$folder done..."
-        }
-        Write-Log @writeLogParams -Message "Dismounting cloudbuilder.vhdx"
-        Dismount-DiskImage -ImagePath $vhdxFullPath
+        Copy-ASDKContent -vhdxFullPath $vhdxFullPath -Verbose
         
         if (Test-Path "C:\CloudDeployment\Configuration\Version\Version.xml")
         {
@@ -163,19 +147,21 @@ else
     }        
 }
 
+Write-Log @writeLogParams -Message "Running BootstrapAzureStackDeployment"
+Set-Location C:\CloudDeployment\Setup
+.\BootstrapAzureStackDeployment.ps1
+
+Write-Log @writeLogParams -Message "Tweaking some files to run ASDK on Azure VM"
+
+Write-Log @writeLogParams -Message "Applying first workaround to tackle bare metal detection"
+workaround1
+
 if ($SkipWorkaround -eq $false)
-{    
-    Write-Log @writeLogParams -Message "Running BootstrapAzureStackDeployment"
-    Set-Location C:\CloudDeployment\Setup
-    .\BootstrapAzureStackDeployment.ps1
-
-    Write-Log @writeLogParams -Message "Tweaking some files to run ASDK on Azure VM"
-
-    Write-Log @writeLogParams -Message "Applying first workaround to tackle bare metal detection"
-    workaround1
-
-    Write-Log @writeLogParams -Message "Applying second workaround since this version is 1802 or higher"
-    workaround2
+{   
+    $outFile = "C:\tools\nuget.exe"
+    Rename-Item -Path $outFile -NewName "nuget_old.exe" -Verbose
+    Invoke-WebRequest -Uri "https://dist.nuget.org/win-x86-commandline/latest/nuget.exe" -OutFile $outFile -Verbose
+    Unblock-File -Path $outFile -Confirm:$false -Verbose
 }
 $pocParameters = Get-Help C:\CloudDeployment\Setup\InstallAzureStackPOC.ps1 -Parameter Nat* -ErrorAction SilentlyContinue
 
@@ -260,7 +246,7 @@ if ($pocParameters.Count -gt 0)
             if (-not ([System.Environment]::GetEnvironmentVariable('BGPNATVMVMNetAdapterFixed', [System.EnvironmentVariableTarget]::Machine) -eq $true))
             {
                 Write-Log @writeLogParams -Message  "Checking $BgpNatVm VM's presence and state"
-                $BgpNatVmObj = Get-VM -Name $BgpNatVm | ? state -eq running
+                $BgpNatVmObj = Get-VM -Name $BgpNatVm | Where-Object state -eq running
                 if ($BgpNatVmObj)
                 {
                     $null = Get-NetAdapter -Name $privateAdapterName -ErrorAction SilentlyContinue  
@@ -369,6 +355,37 @@ $taskstoCompleteUponSuccess = {
                 }
                 Get-ChildItem -Path "C:\Users\Public\Desktop" -Filter "*.lnk" | Remove-Item -Force
                 createDesktopShortcuts
+                #test ASDKConfigurator presence
+                $ASDKConfigScriptPath = (Join-Path -Path $defaultLocalPath -ChildPath Run-ConfigASDK.ps1)
+                if (Test-Path -Path $ASDKConfigScriptPath)
+                {
+                    $taskName4 = "Auto ASDK Configurator Service"
+                    if (Get-ScheduledTask -TaskName $taskName4 -ErrorAction SilentlyContinue)
+                    {
+                        Get-ScheduledTask -TaskName $taskName4 | Unregister-ScheduledTask -Force
+                    }
+                    
+                    $commandToRun = Get-Content -Path $ASDKConfigScriptPath
+                    
+                    $AutoInstallASDKConfiguratorScriptBlock = @"
+                    Set-Location $defaultLocalPath
+                    $commandToRun
+"@    
+                    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $AutoInstallASDKConfiguratorScriptBlock
+                
+                    $registrationParams = @{
+                        TaskName = $taskName4
+                        TaskPath = '\AzureStackonAzureVM'
+                        Action = $action
+                        Settings = New-ScheduledTaskSettingsSet -Priority 4
+                        Force = $true
+                    }
+                    $registrationParams.Trigger = New-ScheduledTaskTrigger -Once -At $((get-date).AddMinutes(2))
+                    $registrationParams.User = "AZURESTACK\AzureStackAdmin"
+                    $registrationParams.RunLevel = 'Highest'
+                
+                    Register-ScheduledTask @registrationParams
+                }
                 Unregister-ScheduledJob -Name $taskName2 -Force
                 break
             }
@@ -403,6 +420,48 @@ if ($pocParameters.Count -gt 0) {
 else {
     Write-Log @writeLogParams -Message "timeserver is FQDN"
     $timeServer = $timeServiceProvider
+    $i = 0
+    $sleep = 1
+    $ttlThreshold = 120    
+    Write-Verbose "Making sure that $timeServer is reachable and TTL ($ttlThreshold) is longer enough to be resolved by the ASDK setup" -Verbose
+    Clear-DnsClientCache
+    Resolve-DnsName -Name $timeServer
+
+    while ($true)
+    {
+        if ($i -ge 100)
+        {
+            Write-Verbose "Name resolution threshold for $timeserver reached by $i try restarting the Host" -Verbose
+            break
+            break
+        }
+        $dnsResult = Resolve-DnsName -Name $timeServer -CacheOnly
+        if ($?)
+        {
+            if ($dnsResult[0].ttl -lt $ttlThreshold)
+            {
+                Write-Verbose "$timeServer TTL is less than $ttlThreshold" -Verbose
+                Clear-DnsClientCache
+                Resolve-DnsName -Name $timeServer
+            }
+            else
+            {
+                Write-Verbose "$timeServer TTL is $($dnsResult[0].ttl)" -Verbose
+                #As a workaround this solves name resolution issues with the timeserver, can be considered 
+                #Get-NetAdapter | Disable-NetAdapter -PassThru -Confirm:$false | Enable-NetAdapter
+                break    
+            }
+        }
+        else
+        {
+            Clear-DnsClientCache
+            Resolve-DnsName -Name $timeServer  
+        }
+        Write-Verbose "Sleeping for $sleep seconds" -Verbose
+        Start-Sleep -Seconds $sleep
+        $i++
+        Write-Verbose "Loop Count: $i" -Verbose
+    }
 }
 
 Write-Log @writeLogParams -Message "timeserver: $timeServer"
@@ -415,7 +474,6 @@ if ($DeploymentType -eq "AAD")
         TimeServer = $timeServer
         DNSForwarder = "8.8.8.8"
     }
-    #if ($version -lt 1812)
     if ($pocParameters.Count -gt 0)
     {
         $global:InstallAzSPOCParams.Add("NATIPv4Subnet","192.168.137.0/28")
@@ -436,7 +494,6 @@ if ($DeploymentType -eq "ADFS")
         DNSForwarder = "8.8.8.8"
         UseADFS = $true
     }
-    #if ($version -lt 1812)
     if ($pocParameters.Count -gt 0)
     {
         $global:InstallAzSPOCParams.Add("NATIPv4Subnet","192.168.137.0/28")
@@ -444,7 +501,7 @@ if ($DeploymentType -eq "ADFS")
         $global:InstallAzSPOCParams.Add("NATIPv4DefaultGateway","192.168.137.1")
     }
 }
-
+Stop-Transcript
 #Azure Stack PoC installer setup
 Set-Location C:\CloudDeployment\Setup
 .\InstallAzureStackPOC.ps1 @InstallAzSPOCParams
